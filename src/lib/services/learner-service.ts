@@ -9,6 +9,7 @@ import { learnerEnrollmentInTransaction } from "@/lib/services/enrollment-servic
 async function getTaskAndProgress(tx: Prisma.TransactionClient, enrollmentId: string, taskCode: string) {
   const task = await tx.taskDefinition.findFirst({
     where: { code: taskCode, programVersion: { cohorts: { some: { enrollments: { some: { id: enrollmentId } } } } } },
+    include: { evidenceRequirements: { include: { evidenceDefinition: true } } },
   });
   if (!task) throw new ApiError(404, "task_not_found", "Không tìm thấy nhiệm vụ trong chương trình hiện tại.");
   const progress = await tx.taskProgress.findUnique({
@@ -99,12 +100,24 @@ export async function submitTask(actor: Actor, input: {
       validateTaskPayload(task.fieldSchema, input.payload);
 
       if (input.evidenceAssetIds.length) {
-        const evidenceCount = await tx.evidenceAsset.count({
+        const evidenceAssets = await tx.evidenceAsset.findMany({
           where: { id: { in: input.evidenceAssetIds }, enrollmentId: enrollment.id, status: "AVAILABLE", submissionId: null },
         });
-        if (evidenceCount !== input.evidenceAssetIds.length) {
+        if (evidenceAssets.length !== input.evidenceAssetIds.length) {
           throw new ApiError(422, "invalid_evidence", "Có minh chứng không tồn tại, không thuộc học viên hoặc đã được dùng.");
         }
+
+        const selectedCodes = new Set(evidenceAssets.map((asset) => asset.evidenceCode));
+        const missingEvidence = task.evidenceRequirements
+          .filter((requirement) => requirement.required && !selectedCodes.has(requirement.evidenceDefinition.code))
+          .map((requirement) => requirement.evidenceDefinition.code);
+        if (missingEvidence.length) {
+          throw new ApiError(422, "evidence_required", "Chưa đủ minh chứng bắt buộc để nộp bài.", { missingEvidence });
+        }
+      } else if (task.evidenceRequirements.some((requirement) => requirement.required)) {
+        throw new ApiError(422, "evidence_required", "Vui lòng tải đủ minh chứng bắt buộc trước khi nộp bài.", {
+          missingEvidence: task.evidenceRequirements.filter((requirement) => requirement.required).map((requirement) => requirement.evidenceDefinition.code),
+        });
       }
 
       const previous = await tx.submission.findFirst({

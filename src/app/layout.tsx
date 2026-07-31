@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "GiftyID OCOP Platform",
-  description: "Backend and certificate verification service for the OCOP 30-day learning journey.",
+  title: "Hành trình OCOP 30 ngày | GiftyID",
+  description: "Bản đồ thực hành chuyển đổi số OCOP: làm từng bước, nộp minh chứng, nhận xác minh và hoàn thành chứng chỉ.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

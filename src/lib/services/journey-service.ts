@@ -139,6 +139,10 @@ export async function getTask(actor: Actor, taskCode: string) {
         orderBy: { version: "desc" },
         include: { evidenceAssets: { where: { status: "AVAILABLE" } }, reviews: { orderBy: { createdAt: "desc" } } },
       },
+      evidenceAssets: {
+        where: { enrollmentId: enrollment.id, status: "AVAILABLE" },
+        orderBy: { createdAt: "desc" },
+      },
     },
   });
   if (!scopedTask) return null;
@@ -153,6 +157,15 @@ export async function getTask(actor: Actor, taskCode: string) {
     estimateMinutes: scopedTask.estimateMinutes,
     fieldSchema: scopedTask.fieldSchema,
     evidenceRequirements: scopedTask.evidenceRequirements.map((item) => ({ ...item.evidenceDefinition, required: item.required })),
+    evidenceAssets: scopedTask.evidenceAssets.map((asset) => ({
+      id: asset.id,
+      code: asset.evidenceCode,
+      name: asset.originalName,
+      mimeType: asset.mimeType,
+      sizeBytes: asset.sizeBytes,
+      submissionId: asset.submissionId,
+      createdAt: asset.createdAt,
+    })),
     progress: scopedTask.taskProgress[0] ?? null,
     draft: scopedTask.drafts[0] ?? null,
     submissions: scopedTask.submissions.map((submission) => ({
