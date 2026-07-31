@@ -3,6 +3,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { Prisma, PrismaClient, type UserRole } from "@prisma/client";
 import { hash } from "bcryptjs";
 import { EVIDENCE_DEFINITIONS, OCOP_PROGRAM, QUANG_HAI_ANSWERS, QUANG_HAI_PROFILE, RUBRIC_CRITERIA, STAGES, TASKS } from "../src/lib/curriculum/ocop-v1";
+import { buildTaskLearningContent } from "../src/lib/curriculum/ocop-learning-content";
 import { certificatePublicId } from "../src/lib/domain/gates";
 import { hashJson } from "../src/lib/domain/hash";
 
@@ -86,6 +87,7 @@ async function main() {
         weight: task.weight,
         gateCode: task.gateCode,
         fieldSchema: task.fields as unknown as Prisma.InputJsonValue,
+        contentSchema: buildTaskLearningContent(task.code, QUANG_HAI_ANSWERS[task.code]) as Prisma.InputJsonValue,
       },
       update: {
         stageId,
@@ -97,6 +99,7 @@ async function main() {
         weight: task.weight,
         gateCode: task.gateCode,
         fieldSchema: task.fields as unknown as Prisma.InputJsonValue,
+        contentSchema: buildTaskLearningContent(task.code, QUANG_HAI_ANSWERS[task.code]) as Prisma.InputJsonValue,
       },
     });
     taskMap.set(task.code, record.id);
@@ -157,7 +160,7 @@ async function main() {
   for (const task of TASKS) {
     await prisma.taskProgress.upsert({
       where: { enrollmentId_taskDefinitionId: { enrollmentId: freshEnrollment.id, taskDefinitionId: taskMap.get(task.code)! } },
-      create: { enrollmentId: freshEnrollment.id, taskDefinitionId: taskMap.get(task.code)!, state: task.gateCode === "G0" ? "READY" : "LOCKED" },
+      create: { enrollmentId: freshEnrollment.id, taskDefinitionId: taskMap.get(task.code)!, state: task.position === 1 ? "READY" : "LOCKED" },
       update: {},
     });
   }

@@ -16,7 +16,7 @@ export async function GET(_: Request, context: { params: Promise<{ id: string }>
     if (actor.role === "LEARNER" && submission.enrollment.userId !== actor.id) throw new ApiError(403, "forbidden", "Bạn không có quyền xem bản nộp này.");
     return {
       id: submission.id,
-      task: { code: submission.taskDefinition.code, title: submission.taskDefinition.title },
+      task: { code: submission.taskDefinition.code, title: submission.taskDefinition.title, contentSchema: submission.taskDefinition.contentSchema, fieldSchema: submission.taskDefinition.fieldSchema },
       version: submission.version,
       status: submission.status,
       payload: submission.payload,

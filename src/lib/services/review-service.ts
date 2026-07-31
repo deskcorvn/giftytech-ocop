@@ -78,6 +78,51 @@ export async function reviewSubmission(actor: Actor, input: {
         where: { enrollmentId_taskDefinitionId: { enrollmentId: submission.enrollmentId, taskDefinitionId: submission.taskDefinitionId } },
         data: { state: progressState, acceptedAt: input.decision === "ACCEPT" ? new Date() : null, version: { increment: 1 } },
       });
+
+      let nextTaskCode: string | null = null;
+      let gateAccepted = false;
+      let programCompleted = false;
+      if (input.decision === "ACCEPT") {
+        const programTasks = await tx.taskDefinition.findMany({
+          where: { programVersionId: submission.taskDefinition.programVersionId },
+          orderBy: { position: "asc" },
+          include: { taskProgress: { where: { enrollmentId: submission.enrollmentId } } },
+        });
+        const currentIndex = programTasks.findIndex((task) => task.id === submission.taskDefinitionId);
+        const nextTask = currentIndex >= 0 ? programTasks[currentIndex + 1] : null;
+        if (nextTask) {
+          await tx.taskProgress.updateMany({
+            where: { enrollmentId: submission.enrollmentId, taskDefinitionId: nextTask.id, state: "LOCKED" },
+            data: { state: "READY", version: { increment: 1 } },
+          });
+          nextTaskCode = nextTask.code;
+        } else {
+          programCompleted = programTasks.every((task) => task.taskProgress[0]?.state === "ACCEPTED" || task.id === submission.taskDefinitionId);
+        }
+
+        const gateTasks = programTasks.filter((task) => task.gateCode === submission.taskDefinition.gateCode);
+        const gateIsComplete = gateTasks.every((task) => task.taskProgress[0]?.state === "ACCEPTED" || task.id === submission.taskDefinitionId);
+        if (gateIsComplete) {
+          const latestGate = await tx.gateDecision.findFirst({
+            where: { enrollmentId: submission.enrollmentId, gateCode: submission.taskDefinition.gateCode },
+            orderBy: { version: "desc" },
+          });
+          if (latestGate?.status !== "ACCEPTED") {
+            await tx.gateDecision.create({
+              data: {
+                enrollmentId: submission.enrollmentId,
+                gateCode: submission.taskDefinition.gateCode,
+                version: (latestGate?.version ?? 0) + 1,
+                status: "ACCEPTED",
+                reason: "Tất cả đầu ra trong chặng đã được mentor xác minh đạt.",
+                score: input.score,
+                decidedById: actor.id,
+              },
+            });
+          }
+          gateAccepted = true;
+        }
+      }
       await appendAudit(tx, {
         actorId: actor.id,
         cohortId: submission.enrollment.cohortId,
@@ -87,7 +132,17 @@ export async function reviewSubmission(actor: Actor, input: {
         entityId: review.id,
         data: { submissionId: submission.id, decision: input.decision, score: input.score, criticalFlags: input.criticalFlags },
       });
-      return { reviewId: review.id, submissionId: submission.id, decision: review.decision, taskState: progress.state, progressVersion: progress.version };
+      return {
+        reviewId: review.id,
+        submissionId: submission.id,
+        enrollmentId: submission.enrollmentId,
+        decision: review.decision,
+        taskState: progress.state,
+        progressVersion: progress.version,
+        nextTaskCode,
+        gateAccepted,
+        programCompleted,
+      };
     },
   });
 }

@@ -91,6 +91,16 @@ export async function createIncident(actor: Actor, input: {
     execute: async (tx) => {
       const cohort = await tx.cohort.findUnique({ where: { id: input.cohortId } });
       if (!cohort) throw new ApiError(404, "cohort_not_found", "Không tìm thấy lớp học.");
+      if (actor.role === "LEARNER") {
+        if (!input.enrollmentId) throw new ApiError(422, "enrollment_required", "Yêu cầu hỗ trợ cần gắn với hồ sơ học viên.");
+        const ownEnrollment = await tx.enrollment.count({
+          where: { id: input.enrollmentId, cohortId: cohort.id, userId: actor.id },
+        });
+        if (!ownEnrollment) throw new ApiError(403, "forbidden", "Bạn không thể gửi yêu cầu cho hồ sơ học viên khác.");
+        if (["S1", "S2"].includes(input.severity)) {
+          throw new ApiError(422, "invalid_learner_severity", "Vui lòng chọn yêu cầu hỗ trợ thông thường hoặc cần phản hồi sớm.");
+        }
+      }
       if (input.enrollmentId) {
         const validEnrollment = await tx.enrollment.count({ where: { id: input.enrollmentId, cohortId: cohort.id } });
         if (!validEnrollment) throw new ApiError(422, "invalid_enrollment", "Học viên không thuộc lớp này.");

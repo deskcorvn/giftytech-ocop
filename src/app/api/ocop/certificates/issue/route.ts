@@ -8,5 +8,5 @@ export const runtime = "nodejs";
 const CertificateSchema = z.object({ enrollmentId: z.string().cuid(), idempotencyKey: z.string().uuid() });
 
 export async function POST(request: Request) {
-  return handleApi(async () => issueCertificate(await requireActor(["COORDINATOR", "ADMIN"]), await parseJson(request, CertificateSchema)), 201);
+  return handleApi(async () => issueCertificate(await requireActor(["MENTOR", "COORDINATOR", "ADMIN"]), await parseJson(request, CertificateSchema)), 201);
 }

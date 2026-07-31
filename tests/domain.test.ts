@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ApiError } from "../src/lib/api/errors";
 import { EVIDENCE_DEFINITIONS, QUANG_HAI_ANSWERS, TASKS } from "../src/lib/curriculum/ocop-v1";
+import { TASK_LEARNING_CONTENT, buildTaskLearningContent } from "../src/lib/curriculum/ocop-learning-content";
 import { nextGate } from "../src/lib/domain/gates";
 import { hashJson, stableStringify } from "../src/lib/domain/hash";
 import { validateTaskPayload } from "../src/lib/domain/validation";
@@ -47,6 +48,25 @@ test("Quang Hai fixture satisfies every task form from start to finish", () => {
       () => validateTaskPayload(task.fields, QUANG_HAI_ANSWERS[task.code]),
       `Fixture failed at ${task.code}`,
     );
+  }
+});
+
+test("every task has a complete guided lesson and mentor rubric", () => {
+  assert.deepEqual(new Set(Object.keys(TASK_LEARNING_CONTENT)), new Set(TASKS.map((task) => task.code)));
+  for (const task of TASKS) {
+    const content = TASK_LEARNING_CONTENT[task.code];
+    assert.ok(content.promise.length >= 30, `${task.code} needs a clear promise`);
+    assert.ok(content.whyItMatters.length >= 50, `${task.code} needs a practical reason`);
+    assert.ok(content.prepare.length >= 3, `${task.code} needs preparation guidance`);
+    assert.ok(content.microSteps.length >= 3, `${task.code} needs micro steps`);
+    assert.ok(content.chatgpt.prompt.length >= 250, `${task.code} needs a useful ChatGPT prompt`);
+    assert.ok(content.chatgpt.reminder.length >= 40, `${task.code} needs an AI truth reminder`);
+    assert.ok(content.selfCheck.length >= 3, `${task.code} needs learner self-checks`);
+    assert.ok(content.commonMistakes.length >= 2, `${task.code} needs common mistakes`);
+    assert.ok(content.mentorCriteria.length >= 3, `${task.code} needs a mentor rubric`);
+    assert.deepEqual(new Set(Object.keys(content.fieldHints)), new Set(task.fields.map((field) => field.key)));
+    const withSample = buildTaskLearningContent(task.code, QUANG_HAI_ANSWERS[task.code]);
+    assert.equal(withSample.sample?.title, "Ví dụ tham khảo: Nước mắm Quang Hải");
   }
 });
 

@@ -27,7 +27,7 @@ export async function getJourney(actor: Actor) {
       },
       taskProgress: true,
       drafts: true,
-      submissions: { orderBy: { version: "desc" } },
+      submissions: { orderBy: { version: "desc" }, include: { reviews: { orderBy: { createdAt: "desc" } } } },
       gateDecisions: { orderBy: [{ gateCode: "asc" }, { version: "desc" }] },
       certificate: true,
     },
@@ -49,6 +49,7 @@ export async function getJourney(actor: Actor) {
       title: task.title,
       objective: task.objective,
       instructions: task.instructions,
+      promise: typeof task.contentSchema === "object" && task.contentSchema && "promise" in task.contentSchema ? String(task.contentSchema.promise) : task.objective,
       position: task.position,
       stage: { code: task.stage.code, title: task.stage.title },
       gateCode: task.gateCode,
@@ -59,6 +60,15 @@ export async function getJourney(actor: Actor) {
       draftVersion: draft?.version ?? 0,
       submittedVersion: submission?.version,
       submissionStatus: submission?.status,
+      submittedAt: submission?.submittedAt,
+      review: submission?.reviews[0]
+        ? {
+            decision: submission.reviews[0].decision,
+            feedback: submission.reviews[0].feedback,
+            score: submission.reviews[0].score,
+            reviewedAt: submission.reviews[0].createdAt,
+          }
+        : null,
       evidence: task.evidenceRequirements.map(({ required, evidenceDefinition }) => ({
         code: evidenceDefinition.code,
         title: evidenceDefinition.title,
@@ -127,25 +137,43 @@ export async function getJourney(actor: Actor) {
 export async function getTask(actor: Actor, taskCode: string) {
   const enrollment = await getLearnerEnrollment(actor);
   const db = getPrisma();
-  const scopedTask = await db.taskDefinition.findFirst({
-    where: { code: taskCode, programVersion: { cohorts: { some: { id: enrollment.cohortId } } } },
-    include: {
-      stage: true,
-      evidenceRequirements: { include: { evidenceDefinition: true } },
-      taskProgress: { where: { enrollmentId: enrollment.id } },
-      drafts: { where: { enrollmentId: enrollment.id } },
-      submissions: {
-        where: { enrollmentId: enrollment.id },
-        orderBy: { version: "desc" },
-        include: { evidenceAssets: { where: { status: "AVAILABLE" } }, reviews: { orderBy: { createdAt: "desc" } } },
+  const [scopedTask, learningContext] = await Promise.all([
+    db.taskDefinition.findFirst({
+      where: { code: taskCode, programVersion: { cohorts: { some: { id: enrollment.cohortId } } } },
+      include: {
+        stage: true,
+        evidenceRequirements: { include: { evidenceDefinition: true } },
+        taskProgress: { where: { enrollmentId: enrollment.id } },
+        drafts: { where: { enrollmentId: enrollment.id } },
+        submissions: {
+          where: { enrollmentId: enrollment.id },
+          orderBy: { version: "desc" },
+          include: { evidenceAssets: { where: { status: "AVAILABLE" } }, reviews: { orderBy: { createdAt: "desc" } } },
+        },
+        evidenceAssets: {
+          where: { enrollmentId: enrollment.id, status: "AVAILABLE" },
+          orderBy: { createdAt: "desc" },
+        },
       },
-      evidenceAssets: {
-        where: { enrollmentId: enrollment.id, status: "AVAILABLE" },
-        orderBy: { createdAt: "desc" },
+    }),
+    db.enrollment.findUnique({
+      where: { id: enrollment.id },
+      include: {
+        user: { select: { displayName: true } },
+        productProfile: true,
+        submissions: {
+          where: { status: "ACCEPTED" },
+          orderBy: { version: "desc" },
+          include: { taskDefinition: { select: { code: true } } },
+        },
       },
-    },
-  });
+    }),
+  ]);
   if (!scopedTask) return null;
+  const previousOutputs: Record<string, unknown> = {};
+  for (const submission of learningContext?.submissions ?? []) {
+    if (!(submission.taskDefinition.code in previousOutputs)) previousOutputs[submission.taskDefinition.code] = submission.payload;
+  }
   return {
     code: scopedTask.code,
     title: scopedTask.title,
@@ -156,6 +184,17 @@ export async function getTask(actor: Actor, taskCode: string) {
     weight: scopedTask.weight,
     estimateMinutes: scopedTask.estimateMinutes,
     fieldSchema: scopedTask.fieldSchema,
+    contentSchema: scopedTask.contentSchema,
+    aiContext: {
+      learnerName: learningContext?.user.displayName ?? actor.displayName,
+      organizationName: enrollment.organizationName,
+      productName: enrollment.productName,
+      province: enrollment.province,
+      primaryChannel: enrollment.primaryChannel,
+      approvedFacts: learningContext?.productProfile?.publicData ?? previousOutputs["product-record"] ?? null,
+      pendingFacts: learningContext?.productProfile?.pendingData ?? null,
+      previousOutputs,
+    },
     evidenceRequirements: scopedTask.evidenceRequirements.map((item) => ({ ...item.evidenceDefinition, required: item.required })),
     evidenceAssets: scopedTask.evidenceAssets.map((asset) => ({
       id: asset.id,

@@ -205,6 +205,7 @@ model TaskDefinition {
   weight               Int
   gateCode             GateCode
   fieldSchema          Json
+  contentSchema        Json                      @default("{}")
   programVersion       ProgramVersion            @relation(fields: [programVersionId], references: [id], onDelete: Cascade)
   stage                StageDefinition           @relation(fields: [stageId], references: [id], onDelete: Restrict)
   evidenceRequirements TaskEvidenceRequirement[]

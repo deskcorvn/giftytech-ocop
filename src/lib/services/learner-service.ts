@@ -99,9 +99,25 @@ export async function submitTask(actor: Actor, input: {
       if (["SUBMITTED", "ACCEPTED"].includes(progress.state)) throw new ApiError(409, "task_not_submittable", "Nhiệm vụ đang chờ duyệt hoặc đã được chấp nhận.");
       validateTaskPayload(task.fieldSchema, input.payload);
 
+      const previous = await tx.submission.findFirst({
+        where: { enrollmentId: enrollment.id, taskDefinitionId: task.id },
+        orderBy: { version: "desc" },
+      });
+      if (previous && previous.status !== "REVISION_REQUIRED" && previous.status !== "REJECTED" && previous.status !== "SUPERSEDED") {
+        throw new ApiError(409, "submission_pending", "Bản nộp hiện tại chưa cho phép nộp phiên bản mới.");
+      }
+
       if (input.evidenceAssetIds.length) {
         const evidenceAssets = await tx.evidenceAsset.findMany({
-          where: { id: { in: input.evidenceAssetIds }, enrollmentId: enrollment.id, status: "AVAILABLE", submissionId: null },
+          where: {
+            id: { in: input.evidenceAssetIds },
+            enrollmentId: enrollment.id,
+            status: "AVAILABLE",
+            OR: [
+              { submissionId: null },
+              ...(previous && ["REVISION_REQUIRED", "REJECTED"].includes(previous.status) ? [{ submissionId: previous.id }] : []),
+            ],
+          },
         });
         if (evidenceAssets.length !== input.evidenceAssetIds.length) {
           throw new ApiError(422, "invalid_evidence", "Có minh chứng không tồn tại, không thuộc học viên hoặc đã được dùng.");
@@ -120,13 +136,6 @@ export async function submitTask(actor: Actor, input: {
         });
       }
 
-      const previous = await tx.submission.findFirst({
-        where: { enrollmentId: enrollment.id, taskDefinitionId: task.id },
-        orderBy: { version: "desc" },
-      });
-      if (previous && previous.status !== "REVISION_REQUIRED" && previous.status !== "REJECTED" && previous.status !== "SUPERSEDED") {
-        throw new ApiError(409, "submission_pending", "Bản nộp hiện tại chưa cho phép nộp phiên bản mới.");
-      }
       if (previous && previous.status !== "SUPERSEDED") {
         await tx.submission.update({ where: { id: previous.id }, data: { status: "SUPERSEDED" } });
       }

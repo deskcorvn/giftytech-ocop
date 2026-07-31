@@ -16,5 +16,5 @@ const IncidentSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  return handleApi(async () => createIncident(await requireActor(["MENTOR", "COORDINATOR", "ADMIN"]), await parseJson(request, IncidentSchema)), 201);
+  return handleApi(async () => createIncident(await requireActor(), await parseJson(request, IncidentSchema)), 201);
 }

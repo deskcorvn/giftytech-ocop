@@ -151,11 +151,12 @@ export async function enrollLearner(actor: Actor, cohortId: string, input: {
           consentShowcase: input.consentShowcase ?? false,
         },
       });
+      const firstTaskPosition = Math.min(...cohort.programVersion.taskDefinitions.map((task) => task.position));
       await tx.taskProgress.createMany({
         data: cohort.programVersion.taskDefinitions.map((task) => ({
           enrollmentId: enrollment.id,
           taskDefinitionId: task.id,
-          state: task.gateCode === "G0" ? "READY" : "LOCKED",
+          state: task.position === firstTaskPosition ? "READY" : "LOCKED",
         })),
       });
       await appendAudit(tx, { actorId: actor.id, cohortId, enrollmentId: enrollment.id, action: "enrollment.created", entityType: "Enrollment", entityId: enrollment.id, data: { username: normalizedUsername, consentProcessing: input.consentProcessing, consentShowcase: input.consentShowcase ?? false } });
