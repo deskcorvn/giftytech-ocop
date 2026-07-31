@@ -181,8 +181,8 @@ function TopHeader({ journey, largeType, onToggleType, onOpenMap, onOpenHelp, on
       <Brand compact />
       <div className="easy-header-actions">
         <button onClick={onToggleType} className={largeType ? "active" : ""} aria-pressed={largeType}><span className="easy-aa">A</span> Chữ lớn</button>
-        <button onClick={onOpenMap}><Icon name="map" size={21} /> <span>Lộ trình</span></button>
-        <button onClick={onOpenHelp}><Icon name="help" size={21} /> <span>Trợ giúp</span></button>
+        <button onClick={onOpenMap} aria-label="Mở lộ trình"><Icon name="map" size={21} /> <span>Lộ trình</span></button>
+        <button onClick={onOpenHelp} aria-label="Mở trợ giúp"><Icon name="help" size={21} /> <span>Trợ giúp</span></button>
         <span className="easy-user-name">{journey.learner.displayName}</span>
         <button onClick={onLogout} title="Đăng xuất"><Icon name="logout" size={21} /><span className="sr-only">Đăng xuất</span></button>
       </div>

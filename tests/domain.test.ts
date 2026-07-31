@@ -6,7 +6,7 @@ import { TASK_LEARNING_CONTENT, buildTaskLearningContent } from "../src/lib/curr
 import { nextGate } from "../src/lib/domain/gates";
 import { hashJson, stableStringify } from "../src/lib/domain/hash";
 import { validateTaskPayload } from "../src/lib/domain/validation";
-import { detectEvidenceMime } from "../src/lib/services/evidence-service";
+import { decryptEvidenceBytes, detectEvidenceMime, encryptEvidenceBytes } from "../src/lib/services/evidence-service";
 
 test("stableStringify and hashJson ignore object key order", () => {
   assert.equal(stableStringify({ b: 2, a: 1 }), stableStringify({ a: 1, b: 2 }));
@@ -74,4 +74,14 @@ test("evidence MIME detection checks file signatures", () => {
   assert.equal(detectEvidenceMime(Buffer.from([0xff, 0xd8, 0xff, 0xe0])), "image/jpeg");
   assert.equal(detectEvidenceMime(Buffer.from("%PDF-1.7\n", "ascii")), "application/pdf");
   assert.equal(detectEvidenceMime(Buffer.from("not-an-image", "ascii")), null);
+});
+
+test("evidence encryption is authenticated and reversible", () => {
+  const key = Buffer.alloc(32, 7);
+  const source = Buffer.from("private OCOP evidence", "utf8");
+  const encrypted = encryptEvidenceBytes(source, key);
+  assert.notDeepEqual(encrypted, source);
+  assert.deepEqual(decryptEvidenceBytes(encrypted, key), source);
+  encrypted[encrypted.length - 1] ^= 1;
+  assert.throws(() => decryptEvidenceBytes(encrypted, key));
 });

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { del, get, put } from "@vercel/blob";
 import type { Actor } from "@/lib/auth/session";
 import { ApiError } from "@/lib/api/errors";
@@ -8,6 +8,37 @@ import { hashJson, sha256 } from "@/lib/domain/hash";
 import { getLearnerEnrollment, requireEnrollmentAccess } from "@/lib/services/enrollment-service";
 
 const SAFE_FILENAME = /[^a-zA-Z0-9._-]+/g;
+const ENCRYPTED_MAGIC = Buffer.from("GOCOP1", "ascii");
+const IV_BYTES = 12;
+const TAG_BYTES = 16;
+
+function evidenceEncryptionKey() {
+  const encoded = process.env.EVIDENCE_ENCRYPTION_KEY;
+  if (!encoded) throw new Error("EVIDENCE_ENCRYPTION_KEY is not configured");
+  const key = Buffer.from(encoded, "base64");
+  if (key.length !== 32) throw new Error("EVIDENCE_ENCRYPTION_KEY must be a base64-encoded 32-byte key");
+  return key;
+}
+
+export function encryptEvidenceBytes(bytes: Buffer, key: Buffer) {
+  if (key.length !== 32) throw new Error("Evidence encryption key must contain 32 bytes");
+  const iv = randomBytes(IV_BYTES);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const ciphertext = Buffer.concat([cipher.update(bytes), cipher.final()]);
+  return Buffer.concat([ENCRYPTED_MAGIC, iv, cipher.getAuthTag(), ciphertext]);
+}
+
+export function decryptEvidenceBytes(envelope: Buffer, key: Buffer) {
+  const headerBytes = ENCRYPTED_MAGIC.length + IV_BYTES + TAG_BYTES;
+  if (key.length !== 32 || envelope.length < headerBytes || !envelope.subarray(0, ENCRYPTED_MAGIC.length).equals(ENCRYPTED_MAGIC)) {
+    throw new Error("Invalid encrypted evidence envelope");
+  }
+  const ivStart = ENCRYPTED_MAGIC.length;
+  const tagStart = ivStart + IV_BYTES;
+  const decipher = createDecipheriv("aes-256-gcm", key, envelope.subarray(ivStart, tagStart));
+  decipher.setAuthTag(envelope.subarray(tagStart, tagStart + TAG_BYTES));
+  return Buffer.concat([decipher.update(envelope.subarray(headerBytes)), decipher.final()]);
+}
 
 function safeFilename(value: string) {
   const cleaned = value.normalize("NFKD").replace(SAFE_FILENAME, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
@@ -58,7 +89,8 @@ export async function uploadEvidence(actor: Actor, input: { taskCode: string; ev
   if (currentCount >= requirement.evidenceDefinition.maxFiles) throw new ApiError(422, "evidence_limit_reached", "Đã đạt số tệp tối đa cho loại minh chứng này.");
 
   const storageKey = `ocop/${enrollment.cohortId}/${enrollment.id}/${input.evidenceCode}/${sha256(input.idempotencyKey).slice(0, 16)}-${safeFilename(input.file.name)}`;
-  const uploaded = await put(storageKey, bytes, { access: "private", contentType: input.file.type, addRandomSuffix: false });
+  const encryptedBytes = encryptEvidenceBytes(bytes, evidenceEncryptionKey());
+  const uploaded = await put(storageKey, encryptedBytes, { access: "public", contentType: "application/octet-stream", addRandomSuffix: false });
 
   try {
     const result = await db.$transaction(async (tx) => {
@@ -95,9 +127,11 @@ export async function streamEvidence(actor: Actor, assetId: string) {
   const asset = await db.evidenceAsset.findUnique({ where: { id: assetId } });
   if (!asset || asset.status !== "AVAILABLE") throw new ApiError(404, "evidence_not_found", "Không tìm thấy minh chứng.");
   await requireEnrollmentAccess(actor, asset.enrollmentId);
-  const blob = await get(asset.storageKey, { access: "private" });
+  const blob = await get(asset.storageKey, { access: "public" });
   if (!blob || blob.statusCode === 304 || !blob.stream) throw new ApiError(404, "evidence_blob_not_found", "Tệp minh chứng không còn trên kho lưu trữ.");
-  return { stream: blob.stream, mimeType: asset.mimeType, filename: asset.originalName, sizeBytes: asset.sizeBytes };
+  const encryptedBytes = Buffer.from(await new Response(blob.stream).arrayBuffer());
+  const bytes = decryptEvidenceBytes(encryptedBytes, evidenceEncryptionKey());
+  return { stream: bytes, mimeType: asset.mimeType, filename: asset.originalName, sizeBytes: asset.sizeBytes };
 }
 
 export async function deleteEvidence(actor: Actor, assetId: string) {
