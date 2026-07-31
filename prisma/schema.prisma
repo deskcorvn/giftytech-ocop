@@ -1,0 +1,532 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  LEARNER
+  MENTOR
+  COORDINATOR
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum ProgramVersionStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum CohortStatus {
+  DRAFT
+  OPEN
+  ACTIVE
+  CLOSED
+  ARCHIVED
+}
+
+enum EnrollmentStatus {
+  INVITED
+  ACTIVE
+  PAUSED
+  WITHDRAWN
+  COMPLETED
+}
+
+enum GateCode {
+  G0
+  G1
+  G2
+  G3
+  G4
+}
+
+enum TaskState {
+  LOCKED
+  READY
+  IN_PROGRESS
+  SUBMITTED
+  REVISION_REQUIRED
+  ACCEPTED
+}
+
+enum SubmissionStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  REVISION_REQUIRED
+  ACCEPTED
+  REJECTED
+  SUPERSEDED
+}
+
+enum EvidenceStatus {
+  AVAILABLE
+  QUARANTINED
+  DELETED
+}
+
+enum ReviewDecision {
+  ACCEPT
+  REVISION_REQUIRED
+  REJECT
+}
+
+enum GateStatus {
+  NOT_READY
+  CONDITIONAL
+  REVISION_REQUIRED
+  ACCEPTED
+}
+
+enum IncidentSeverity {
+  S1
+  S2
+  S3
+  S4
+}
+
+enum IncidentStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+  CLOSED
+}
+
+enum CertificateStatus {
+  ISSUED
+  REVOKED
+}
+
+model User {
+  id                 String              @id @default(cuid())
+  username           String              @unique
+  email              String?             @unique
+  displayName        String
+  role               UserRole
+  status             UserStatus          @default(ACTIVE)
+  credential         UserCredential?
+  sessions           Session[]
+  enrollments        Enrollment[]
+  uploadedEvidence   EvidenceAsset[]     @relation("EvidenceUploader")
+  reviews            Review[]            @relation("ReviewAuthor")
+  gateDecisions      GateDecision[]      @relation("GateDecisionAuthor")
+  issuedCertificates Certificate[]       @relation("CertificateIssuer")
+  createdIncidents   Incident[]          @relation("IncidentCreator")
+  assignedIncidents  Incident[]          @relation("IncidentAssignee")
+  auditEvents        AuditEvent[]
+  idempotencyRecords IdempotencyRecord[]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+}
+
+model UserCredential {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  passwordHash String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Session {
+  id         String    @id @default(cuid())
+  userId     String
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  lastSeenAt DateTime  @default(now())
+  revokedAt  DateTime?
+  userAgent  String?
+  ipHash     String?
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
+
+  @@index([userId, expiresAt])
+}
+
+model Program {
+  id        String           @id @default(cuid())
+  code      String           @unique
+  name      String
+  versions  ProgramVersion[]
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+}
+
+model ProgramVersion {
+  id                  String               @id @default(cuid())
+  programId           String
+  version             Int
+  title               String
+  description         String
+  status              ProgramVersionStatus @default(DRAFT)
+  publishedAt         DateTime?
+  program             Program              @relation(fields: [programId], references: [id], onDelete: Cascade)
+  stages              StageDefinition[]
+  taskDefinitions     TaskDefinition[]
+  evidenceDefinitions EvidenceDefinition[]
+  rubricCriteria      RubricCriterion[]
+  cohorts             Cohort[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  @@unique([programId, version])
+}
+
+model StageDefinition {
+  id               String           @id @default(cuid())
+  programVersionId String
+  code             String
+  title            String
+  position         Int
+  programVersion   ProgramVersion   @relation(fields: [programVersionId], references: [id], onDelete: Cascade)
+  tasks            TaskDefinition[]
+
+  @@unique([programVersionId, code])
+  @@unique([programVersionId, position])
+}
+
+model TaskDefinition {
+  id                   String                    @id @default(cuid())
+  programVersionId     String
+  stageId              String
+  code                 String
+  title                String
+  objective            String
+  instructions         String
+  position             Int
+  estimateMinutes      Int
+  weight               Int
+  gateCode             GateCode
+  fieldSchema          Json
+  programVersion       ProgramVersion            @relation(fields: [programVersionId], references: [id], onDelete: Cascade)
+  stage                StageDefinition           @relation(fields: [stageId], references: [id], onDelete: Restrict)
+  evidenceRequirements TaskEvidenceRequirement[]
+  taskProgress         TaskProgress[]
+  drafts               Draft[]
+  submissions          Submission[]
+  evidenceAssets       EvidenceAsset[]
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+
+  @@unique([programVersionId, code])
+  @@unique([programVersionId, position])
+  @@index([stageId])
+}
+
+model EvidenceDefinition {
+  id               String                    @id @default(cuid())
+  programVersionId String
+  code             String
+  title            String
+  description      String
+  allowedMimeTypes String[]
+  maxSizeBytes     Int                       @default(4194304)
+  maxFiles         Int                       @default(3)
+  programVersion   ProgramVersion            @relation(fields: [programVersionId], references: [id], onDelete: Cascade)
+  taskRequirements TaskEvidenceRequirement[]
+
+  @@unique([programVersionId, code])
+}
+
+model TaskEvidenceRequirement {
+  taskDefinitionId     String
+  evidenceDefinitionId String
+  required             Boolean            @default(true)
+  taskDefinition       TaskDefinition     @relation(fields: [taskDefinitionId], references: [id], onDelete: Cascade)
+  evidenceDefinition   EvidenceDefinition @relation(fields: [evidenceDefinitionId], references: [id], onDelete: Cascade)
+
+  @@id([taskDefinitionId, evidenceDefinitionId])
+}
+
+model RubricCriterion {
+  id               String         @id @default(cuid())
+  programVersionId String
+  code             String
+  groupCode        String
+  title            String
+  description      String
+  weight           Int
+  criticalMinimum  Int?
+  evidenceCodes    String[]
+  programVersion   ProgramVersion @relation(fields: [programVersionId], references: [id], onDelete: Cascade)
+
+  @@unique([programVersionId, code])
+}
+
+model Cohort {
+  id               String           @id @default(cuid())
+  programVersionId String
+  code             String           @unique
+  name             String
+  status           CohortStatus     @default(DRAFT)
+  startAt          DateTime
+  endAt            DateTime
+  timezone         String           @default("Asia/Ho_Chi_Minh")
+  baselineCount    Int?
+  programVersion   ProgramVersion   @relation(fields: [programVersionId], references: [id], onDelete: Restrict)
+  enrollments      Enrollment[]
+  incidents        Incident[]
+  auditEvents      AuditEvent[]
+  reportSnapshots  ReportSnapshot[]
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@index([programVersionId, status])
+}
+
+model Enrollment {
+  id                String           @id @default(cuid())
+  cohortId          String
+  userId            String
+  status            EnrollmentStatus @default(INVITED)
+  organizationName  String
+  productName       String
+  province          String
+  primaryChannel    String?
+  consentProcessing Boolean          @default(false)
+  consentShowcase   Boolean          @default(false)
+  enrolledAt        DateTime         @default(now())
+  completedAt       DateTime?
+  cohort            Cohort           @relation(fields: [cohortId], references: [id], onDelete: Cascade)
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productProfile    ProductProfile?
+  taskProgress      TaskProgress[]
+  drafts            Draft[]
+  submissions       Submission[]
+  evidenceAssets    EvidenceAsset[]
+  gateDecisions     GateDecision[]
+  scores            Score[]
+  certificate       Certificate?
+  incidents         Incident[]
+  auditEvents       AuditEvent[]
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@unique([cohortId, userId])
+  @@index([userId, status])
+}
+
+model ProductProfile {
+  id           String     @id @default(cuid())
+  enrollmentId String     @unique
+  version      Int        @default(1)
+  publicData   Json
+  pendingData  Json?
+  sourceNotes  String?
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}
+
+model TaskProgress {
+  id               String         @id @default(cuid())
+  enrollmentId     String
+  taskDefinitionId String
+  state            TaskState      @default(LOCKED)
+  version          Int            @default(1)
+  startedAt        DateTime?
+  submittedAt      DateTime?
+  acceptedAt       DateTime?
+  enrollment       Enrollment     @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  taskDefinition   TaskDefinition @relation(fields: [taskDefinitionId], references: [id], onDelete: Restrict)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@unique([enrollmentId, taskDefinitionId])
+  @@index([enrollmentId, state])
+}
+
+model Draft {
+  id               String         @id @default(cuid())
+  enrollmentId     String
+  taskDefinitionId String
+  payload          Json
+  version          Int            @default(1)
+  enrollment       Enrollment     @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  taskDefinition   TaskDefinition @relation(fields: [taskDefinitionId], references: [id], onDelete: Restrict)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@unique([enrollmentId, taskDefinitionId])
+}
+
+model Submission {
+  id               String           @id @default(cuid())
+  enrollmentId     String
+  taskDefinitionId String
+  version          Int
+  payload          Json
+  status           SubmissionStatus @default(SUBMITTED)
+  submittedAt      DateTime         @default(now())
+  enrollment       Enrollment       @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  taskDefinition   TaskDefinition   @relation(fields: [taskDefinitionId], references: [id], onDelete: Restrict)
+  evidenceAssets   EvidenceAsset[]
+  reviews          Review[]
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@unique([enrollmentId, taskDefinitionId, version])
+  @@index([status, submittedAt])
+}
+
+model EvidenceAsset {
+  id               String          @id @default(cuid())
+  enrollmentId     String
+  taskDefinitionId String?
+  submissionId     String?
+  evidenceCode     String
+  storageKey       String          @unique
+  blobUrl          String
+  originalName     String
+  mimeType         String
+  sizeBytes        Int
+  sha256           String
+  status           EvidenceStatus  @default(AVAILABLE)
+  uploadedById     String
+  enrollment       Enrollment      @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  taskDefinition   TaskDefinition? @relation(fields: [taskDefinitionId], references: [id], onDelete: Restrict)
+  submission       Submission?     @relation(fields: [submissionId], references: [id], onDelete: SetNull)
+  uploadedBy       User            @relation("EvidenceUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
+  createdAt        DateTime        @default(now())
+  deletedAt        DateTime?
+
+  @@index([enrollmentId, evidenceCode, status])
+  @@index([submissionId])
+}
+
+model Review {
+  id            String         @id @default(cuid())
+  submissionId  String
+  reviewerId    String
+  decision      ReviewDecision
+  score         Int?
+  rubric        Json?
+  feedback      String
+  criticalFlags String[]       @default([])
+  submission    Submission     @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  reviewer      User           @relation("ReviewAuthor", fields: [reviewerId], references: [id], onDelete: Restrict)
+  createdAt     DateTime       @default(now())
+
+  @@index([submissionId, createdAt])
+  @@index([reviewerId, createdAt])
+}
+
+model GateDecision {
+  id           String     @id @default(cuid())
+  enrollmentId String
+  gateCode     GateCode
+  version      Int
+  status       GateStatus
+  reason       String
+  score        Int?
+  decidedById  String
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  decidedBy    User       @relation("GateDecisionAuthor", fields: [decidedById], references: [id], onDelete: Restrict)
+  createdAt    DateTime   @default(now())
+
+  @@unique([enrollmentId, gateCode, version])
+  @@index([enrollmentId, gateCode, createdAt])
+}
+
+model Score {
+  id           String     @id @default(cuid())
+  enrollmentId String
+  version      Int
+  total        Int
+  breakdown    Json
+  inputHash    String
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@unique([enrollmentId, version])
+}
+
+model Certificate {
+  id           String            @id @default(cuid())
+  publicId     String            @unique
+  enrollmentId String            @unique
+  status       CertificateStatus @default(ISSUED)
+  score        Int
+  snapshot     Json
+  snapshotHash String
+  issuedById   String
+  issuedAt     DateTime          @default(now())
+  revokedAt    DateTime?
+  revokeReason String?
+  enrollment   Enrollment        @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
+  issuedBy     User              @relation("CertificateIssuer", fields: [issuedById], references: [id], onDelete: Restrict)
+}
+
+model Incident {
+  id           String           @id @default(cuid())
+  cohortId     String
+  enrollmentId String?
+  createdById  String
+  assignedToId String?
+  severity     IncidentSeverity
+  status       IncidentStatus   @default(OPEN)
+  category     String
+  description  String
+  resolution   String?
+  cohort       Cohort           @relation(fields: [cohortId], references: [id], onDelete: Cascade)
+  enrollment   Enrollment?      @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
+  createdBy    User             @relation("IncidentCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  assignedTo   User?            @relation("IncidentAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@index([cohortId, status, severity])
+}
+
+model ReportSnapshot {
+  id        String   @id @default(cuid())
+  cohortId  String
+  kind      String
+  inputHash String
+  data      Json
+  cohort    Cohort   @relation(fields: [cohortId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([cohortId, kind, createdAt])
+}
+
+model AuditEvent {
+  id           String      @id @default(cuid())
+  actorId      String?
+  cohortId     String?
+  enrollmentId String?
+  action       String
+  entityType   String
+  entityId     String
+  data         Json?
+  actor        User?       @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  cohort       Cohort?     @relation(fields: [cohortId], references: [id], onDelete: SetNull)
+  enrollment   Enrollment? @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
+  createdAt    DateTime    @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([cohortId, createdAt])
+}
+
+model IdempotencyRecord {
+  id             String   @id @default(cuid())
+  key            String   @unique
+  actorId        String
+  operation      String
+  requestHash    String
+  responseStatus Int
+  responseBody   Json
+  expiresAt      DateTime
+  actor          User     @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+
+  @@index([actorId, operation, createdAt])
+  @@index([expiresAt])
+}
