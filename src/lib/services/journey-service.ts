@@ -85,6 +85,7 @@ export async function getJourney(actor: Actor) {
     .reduce((sum, task) => sum + task.weight, 0);
   const nextTask =
     tasks.find((task) => task.state === "REVISION_REQUIRED") ??
+    tasks.find((task) => task.state === "SUBMITTED") ??
     tasks.find((task) => task.state === "IN_PROGRESS") ??
     tasks.find((task) => task.state === "READY") ??
     null;
